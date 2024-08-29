@@ -140,3 +140,6 @@ class Map:
             self.draw_curve(curve, param, a, b, **plot).show()
         return param[seek]
 
+
+# PCA analysis of raman spectrums of hBN structures with different isotope content /
+# Analiza PCA widma Ramanowskiego struktur hBN z różnymi izotpoami hBNu
