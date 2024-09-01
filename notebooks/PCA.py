@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 from plotly import graph_objects as go
 from scipy.optimize import curve_fit
+import rampy
 
 def lorentz(X, mean, sigma, scale, offset):
     return scale / (np.pi * sigma * (1 + ((X - mean) / sigma) ** 2)) + offset
@@ -35,6 +36,9 @@ def line(X, offset):
     return np.ones(len(X)) * offset
 
 
+def normalize(vector):
+    return vector / np.linalg.norm(vector)
+
 class Map:
     refit_vectors = 0
     refit_matrices = []
@@ -55,11 +59,12 @@ class Map:
             data = data[(data['RamanShift'] >= kwargs['begin']) & (data['RamanShift'] <= kwargs['end'])]
 
         self.raman_shift = data[(data['x'] == 0) & (data['y'] == 0)]['RamanShift'].values
-        print(data.head())
-        print(self.raman_shift, len(self.raman_shift), type(self.raman_shift))
         self.shape = (len(data['x'].unique()), len(data['y'].unique()))
-        print(self.shape)
-        self.data_matrix = data['Intensity'].values.reshape((len(self.raman_shift), -1))
+        self.data_matrix = data['Intensity'].values.reshape((self.shape[0] * self.shape[1], -1))
+        if 'baseline' and 'roi' in kwargs:
+            for spectrum in self.data_matrix:
+                ycalc, base = rampy.baseline(self.raman_shift, spectrum, kwargs['roi'], kwargs['baseline'])
+                spectrum -= base.T[0]
 
         self.cov_matrix = np.cov(self.data_matrix)
 
@@ -76,14 +81,14 @@ class Map:
     def reftit_matrix(self):
         rm = np.identity(self.refit_vectors)
         for refit_matrix in self.refit_matrices:
-            rm = np.dot(rm, refit_matrix)
+            rm = np.dot(refit_matrix, rm)
         return rm
 
     def physical_base_vectors(self):
-        return np.dot(self.reftit_matrix(), self.base_vectors[self.refit_vectors])
+        return np.dot(self.reftit_matrix(), self.base_vectors[:self.refit_vectors])
 
     def physical_vectors(self):
-        return np.dot(self.vectors[self.refit_vectors].T, inv(self.reftit_matrix())).T
+        return np.dot(self.vectors[:self.refit_vectors].T, inv(self.reftit_matrix())).T
 
     def plotComponent(self, num, physical=False):
         img = self.vectors[num]
@@ -92,33 +97,46 @@ class Map:
         fig = px.imshow(np.reshape(img, self.shape), title='Component ' + str(num))
         return fig
 
-    def plotBaseVector(self, num, physical=False, normalize=False):
+    def plotBaseVector(self, num, physical=False, normalize_vector=False):
         vector = self.base_vectors[num]
         if physical:
             vector = self.physical_base_vectors()[num]
-        if normalize:
-            return px.line(x=self.raman_shift, y=norm(vector), title='Num: ' + str(num))
+        if normalize_vector:
+            return px.line(x=self.raman_shift, y=normalize(vector), title='Num: ' + str(num))
         else:
             return px.line(x=self.raman_shift, y=vector, title='Num: ' + str(num))
 
     def plotSpectrums(self, *args, **kwargs):
         fig = go.Figure()
         for num in args:
-            fig.add_scatter(x=self.raman_shift, y=self.data_matrix[args], mode='lines', name='ID: ' + str(num), **kwargs)
+            fig.add_scatter(x=self.raman_shift, y=self.data_matrix[num], mode='lines', name='ID: ' + str(num), **kwargs)
         fig.update_layout(hovermode="x")
         return fig
 
-    def plotBaseVectors(self, count, normalize=False, **kwargs):
+    def plotBaseVectors(self, count, normalize_vector=False, **kwargs):
         fig = go.Figure()
         for num in range(count):
-            if normalize:
-                fig.add_scatter(x=self.raman_shift, y=norm(self.base_vectors[num]),
+            if normalize_vector:
+                fig.add_scatter(x=self.raman_shift, y=normalize(self.base_vectors[num]),
                                 mode='lines', name='Num: ' + str(num), **kwargs)
             else:
                 fig.add_scatter(x=self.raman_shift, y=self.base_vectors[num],
                                 mode='lines', name='Num: ' + str(num), **kwargs)
         fig.update_layout(hovermode="x")
         return fig
+
+    def addRefitMatrix(self, matrix, normalized=False):
+        if matrix.shape[0] != matrix.shape[1]:
+            raise Exception('Matrix is not square')
+        if matrix.shape[0] != self.refit_vectors:
+            raise Exception('Matrix has wrong size')
+
+        if normalized:
+            for i, vector in enumerate(matrix):
+                for j, value in enumerate(vector):
+                    matrix[i][j] *= norm(self.physical_base_vectors()[i]) / norm(self.physical_base_vectors()[j])
+
+        self.refit_matrices.append(matrix)
 
     def posToId(self, x, y):
         return self.shape[0] * y + x
