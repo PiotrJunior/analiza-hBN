@@ -7,7 +7,7 @@ from plotly import graph_objects as go
 from scipy.optimize import curve_fit
 import rampy
 
-def lorentz(X, mean, sigma, scale, offset):
+def lorentz(X, scale, mean, sigma, offset):
     return scale / (np.pi * sigma * (1 + ((X - mean) / sigma) ** 2)) + offset
 
 
@@ -90,8 +90,10 @@ class Map:
     def physical_vectors(self):
         return np.dot(self.vectors[:self.refit_vectors].T, inv(self.reftit_matrix())).T
 
-    def plotComponent(self, num, physical=False):
+    def plotComponent(self, num, physical=False, log=False):
         img = self.vectors[num]
+        if log:
+            img = np.log(img + 1)
         if physical:
             img = self.physical_vectors()[num]
         fig = px.imshow(np.reshape(img, self.shape), title='Component ' + str(num))
@@ -110,6 +112,13 @@ class Map:
         fig = go.Figure()
         for num in args:
             fig.add_scatter(x=self.raman_shift, y=self.data_matrix[num], mode='lines', name='ID: ' + str(num), **kwargs)
+        fig.update_layout(hovermode="x")
+        return fig
+
+    def plotSpectrumWithLorenzian(self, num, amp, cen, wid, off):
+        fig = go.Figure()
+        fig.add_scatter(x=self.raman_shift, y=self.data_matrix[num], mode='lines', name='ID: ' + str(num))
+        fig.add_scatter(x=self.raman_shift, y=lorentz(self.raman_shift, amp, cen, wid, off), mode='lines', name='Lorentzian')
         fig.update_layout(hovermode="x")
         return fig
 
